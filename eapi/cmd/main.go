@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"encoding/json"
@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"testTockenizedAPI/eapi"
 )
 
 //const tokenTimeToLive = 30
@@ -56,7 +55,6 @@ func lastOrCreate(userName, userPassword string) (res bool) {
 func createToken(w http.ResponseWriter, req *http.Request) {
 	var acc account
 
-	var _ eapi.JwtToken
 	err := json.NewDecoder(req.Body).Decode(&acc)
 	if err != nil {
 		log.Println(err)

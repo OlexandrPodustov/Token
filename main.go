@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"./"
+	"token/eapi"
 )
 
 func deferredClose(res *http.Response) {
@@ -21,6 +21,8 @@ func main() {
 	token := authenticate(j)
 	println("tst")
 
+	var t eapi.JwtToken
+	checkTokenTimeToLive(t)
 	requestTokenized(token)
 
 }
@@ -58,7 +60,7 @@ func authenticate(jsonStr []byte) (token string) {
 	return token
 }
 
-func checkTokenTimeToLive(t JwtToken) (ok bool) {
+func checkTokenTimeToLive(t eapi.JwtToken) (ok bool) {
 
 	return
 }
