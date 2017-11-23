@@ -3,60 +3,66 @@ package main
 import (
 	"encoding/json"
 	"github.com/dgrijalva/jwt-go"
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
-	"io"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 	"token/eapi"
 )
 
-const tokenTimeToLive = 30
+const tokenTimeToLive = 6
 
-var mySigningKey = []byte("secret")
+var (
+	mySigningKey = []byte("secret")
+	db           = make(map[string]struct{})
+)
 
 type account struct {
-	Name     string `gorm:"size:255"`
-	Password string `gorm:"size:255"`
-	eapi.JwtToken
-	gorm.Model
+	Name     string
+	Password string
 }
 
-func lastOrCreate(userName, userPassword string) (res bool) {
-	db, err := gorm.Open("postgres", "host=localhost user=postgres sslmode=disable "+
-		"password=mysecretpassword")
-	if err != nil {
-		log.Println("failed to connect database")
+func main() {
+	http.HandleFunc("/hello", requestHandlerTokenized)
+	http.HandleFunc("/gettoken", createToken)
+
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func validateToken(token string) bool {
+	var l sync.RWMutex
+
+	l.RLock()
+	_, ok := db[token]
+	l.RUnlock()
+
+	if !ok {
+		log.Println("The token is not valid")
+		return false
+	}
+	log.Println("The token is OK")
+
+	return true
+}
+
+func requestHandlerTokenized(w http.ResponseWriter, req *http.Request) {
+	//todo: get token from req instead of this kludge
+	//t := "tt"
+	v := req.Header.Get("Authentication")
+	log.Println(" token ", v)
+
+	if !validateToken(v) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
 	}
 
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Println("failed to connect database")
-		}
-	}()
-
-	var acc account
-	db.Last(&acc, "name = ?", userName)
-	//log.Printf("before create %+v,%+v,%+v\n\n", acc.Name, acc.Password, acc.Password == userPassword)
-
-	//todo: substitute by switch
-	if acc.Name == "" {
-		db.AutoMigrate(&account{})
-		db.Create(&account{Name: userName, Password: userPassword})
-		log.Println("The account was created, didn't existed")
-		res = true
-	} else if acc.Password != userPassword {
-		log.Println("Client has provided wrong password")
-	} else if acc.Name != "" && acc.Password == userPassword {
-		log.Println("Authentication has been passed successfully")
-		res = true
-	}
-
-	return res
+	w.WriteHeader(http.StatusOK)
+	return
 }
 
 func createToken(w http.ResponseWriter, req *http.Request) {
 	var acc account
+	var l sync.RWMutex
 
 	err := json.NewDecoder(req.Body).Decode(&acc)
 	if err != nil {
@@ -64,50 +70,54 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	//log.Println("parsed json - ", acc)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"username": acc.Name,
 		"password": acc.Password,
 	})
-
-	var tokenString string
-
-	if lastOrCreate(acc.Name, acc.Password) {
-		//todo: instead of use mySigningKey - retrieve the secret from a db
-		tokenString, err = token.SignedString(mySigningKey)
-		log.Println("token has been created")
-		if err != nil {
-			log.Println(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	}
-
-	tok := eapi.JwtToken{tokenString, tokenTimeToLive}
-
-	//todo: save token into db for further validation
-	log.Printf("+%v", tok)
-	w.Header().Set("AUTH-TOKEN", tok.Token)
-
-}
-
-func helloServer(w http.ResponseWriter, req *http.Request) {
-	w.WriteHeader(401)
-
-	status := http.StatusText(401)
-	_, err := io.WriteString(w, status)
+	tokenString, err := token.SignedString(mySigningKey)
 	if err != nil {
 		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	//if lastOrCreate("s") {
-	//	io.WriteString(w, "hello, world!\n")
-	//}
+	log.Println("token has been created")
+
+	l.RLock()
+	db[tokenString] = struct{}{}
+	l.RUnlock()
+
+	tokenCreated := eapi.JwtToken{
+		Token:      tokenString,
+		TimeToLive: time.Now().Add(tokenTimeToLive * time.Second),
+	}
+	//log.Println("time.Now() - ", time.Now())
+
+	b, err := json.Marshal(tokenCreated)
+	if err != nil {
+		log.Println("can't Marshal token", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Write(b)
+	w.WriteHeader(http.StatusOK)
+
+	go sanitizer(tokenCreated)
+
+	return
 }
 
-func main() {
+func sanitizer(token eapi.JwtToken) {
+	var l sync.RWMutex
 
-	http.HandleFunc("/", helloServer)
-	http.HandleFunc("/gettoken", createToken)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	//log.Println("db before delete", db)
+	//don't know how to trigger smth at some time. temporarily will so this via sleep
+	//time.Sleep(token.TimeToLive)
+	time.Sleep(tokenTimeToLive * time.Second)
+	l.RLock()
+	delete(db, token.Token)
+	l.RUnlock()
+	//log.Println(db)
 }
