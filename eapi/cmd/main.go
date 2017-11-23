@@ -8,15 +8,17 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"token/eapi"
 )
 
-//const tokenTimeToLive = 30
+const tokenTimeToLive = 30
 
 var mySigningKey = []byte("secret")
 
 type account struct {
 	Name     string `gorm:"size:255"`
 	Password string `gorm:"size:255"`
+	eapi.JwtToken
 	gorm.Model
 }
 
@@ -24,19 +26,20 @@ func lastOrCreate(userName, userPassword string) (res bool) {
 	db, err := gorm.Open("postgres", "host=localhost user=postgres sslmode=disable "+
 		"password=mysecretpassword")
 	if err != nil {
-		panic("failed to connect database")
+		log.Println("failed to connect database")
 	}
 
 	defer func() {
 		if err := db.Close(); err != nil {
-			panic("failed to connect database")
+			log.Println("failed to connect database")
 		}
 	}()
 
 	var acc account
 	db.Last(&acc, "name = ?", userName)
-	log.Printf("before create %+v,%+v,%+v\n\n", acc.Name, acc.Password, acc.Password == userPassword)
+	//log.Printf("before create %+v,%+v,%+v\n\n", acc.Name, acc.Password, acc.Password == userPassword)
 
+	//todo: substitute by switch
 	if acc.Name == "" {
 		db.AutoMigrate(&account{})
 		db.Create(&account{Name: userName, Password: userPassword})
@@ -58,6 +61,8 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 	err := json.NewDecoder(req.Body).Decode(&acc)
 	if err != nil {
 		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -65,20 +70,25 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 		"password": acc.Password,
 	})
 
-	var tokenString = "token hasn't been created"
+	var tokenString string
 
 	if lastOrCreate(acc.Name, acc.Password) {
 		//todo: instead of use mySigningKey - retrieve the secret from a db
 		tokenString, err = token.SignedString(mySigningKey)
+		log.Println("token has been created")
 		if err != nil {
 			log.Println(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}
 
-	_, err = w.Write([]byte(tokenString))
-	if err != nil {
-		log.Println(err)
-	}
+	tok := eapi.JwtToken{tokenString, tokenTimeToLive}
+
+	//todo: save token into db for further validation
+	log.Printf("+%v", tok)
+	w.Header().Set("AUTH-TOKEN", tok.Token)
+
 }
 
 func helloServer(w http.ResponseWriter, req *http.Request) {
