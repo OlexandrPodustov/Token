@@ -40,7 +40,7 @@ func validateToken(token string) bool {
 		log.Println("The token is not valid")
 		return false
 	}
-	log.Println("The token is OK")
+	//	log.Println("The token is OK")
 
 	return true
 }
@@ -80,11 +80,11 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	log.Println("token has been created")
+	//log.Println("token has been created")
 
-	l.RLock()
+	l.Lock()
 	db[tokenString] = struct{}{}
-	l.RUnlock()
+	l.Unlock()
 
 	tokenCreated := eapi.JwtToken{
 		Token:      tokenString,
@@ -118,8 +118,8 @@ func sanitizer(token eapi.JwtToken) {
 	//don't know how to trigger smth at some time. temporarily will so this via sleep
 	//time.Sleep(token.TimeToLive)
 	time.Sleep(tokenTimeToLive * time.Second)
-	l.RLock()
+	l.Lock()
 	delete(db, token.Token)
-	l.RUnlock()
+	l.Unlock()
 	//log.Println(db)
 }

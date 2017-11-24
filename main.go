@@ -14,12 +14,13 @@ const localhost = "http://localhost:8080/"
 var j = []byte(`{ "name": "olexa", "password": "pass" }`)
 
 func main() {
+	http.HandleFunc("/main", mainEndpoint)
+	log.Fatal(http.ListenAndServe(":8082", nil))
+}
+
+func mainEndpoint(w http.ResponseWriter, r *http.Request) {
 	var acquiredToken = new(eapi.JwtToken)
 
-	if !requestTokenized(acquiredToken) {
-		acquiredToken = authenticate(j)
-	}
-	time.Sleep(5 * time.Second)
 	if !requestTokenized(acquiredToken) {
 		acquiredToken = authenticate(j)
 	}
@@ -28,8 +29,10 @@ func main() {
 func requestTokenized(token *eapi.JwtToken) bool {
 	if !tokenAlive(token) {
 		token = authenticate(j)
+		//todo: check token nil value
 	}
-	time.Sleep(5 * time.Second)
+
+	//time.Sleep(1 * time.Second)
 	url := localhost + "hello"
 	client := &http.Client{}
 
@@ -45,8 +48,8 @@ func requestTokenized(token *eapi.JwtToken) bool {
 	}
 	defer deferredClose(resp)
 
-	log.Println("requestTokenized", resp.Status)
 	if resp.StatusCode != http.StatusOK {
+		log.Println("requestTokenized", resp.Status)
 		return false
 	}
 
@@ -58,6 +61,7 @@ func authenticate(jsonStr []byte) (token *eapi.JwtToken) {
 	resp, err := http.Post(url, "", bytes.NewBuffer(jsonStr))
 	if err != nil {
 		log.Println(err)
+		return
 	}
 	defer deferredClose(resp)
 
@@ -74,7 +78,7 @@ func tokenAlive(t *eapi.JwtToken) bool {
 	//log.Printf("tokenAlive time.Now().Unix() %+v", time.Now().Unix())
 	//log.Printf("tokenAlive t.TimeToLive.Unix() %+v", t.TimeToLive.Unix())
 	if time.Now().Unix() >= t.TimeToLive.Unix() {
-		log.Println("Token has died")
+		//log.Println("Token has died")
 		return false
 	}
 	return true

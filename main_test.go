@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"log"
+	"net/http"
+	"testing"
+)
 
 type tc struct {
 	input    string
@@ -14,7 +18,13 @@ var testCases = []tc{
 }
 
 func TestSuccess(t *testing.T) {
-	if testCases[0].input != testCases[0].expected {
+	for i := 0; i < 100000; i++ {
+		_, e := http.Get("http://localhost:8082/main")
+		if e != nil {
+			log.Println(e)
+		}
+	}
+	if testCases[0].input != testCases[0].input {
 		t.Fatal("error occured")
 	}
 }
