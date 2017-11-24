@@ -23,7 +23,7 @@ type account struct {
 }
 
 func main() {
-	http.HandleFunc("/hello", requestHandlerTokenized)
+	http.HandleFunc("/hello", handlerTokenized)
 	http.HandleFunc("/gettoken", createToken)
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -45,11 +45,8 @@ func validateToken(token string) bool {
 	return true
 }
 
-func requestHandlerTokenized(w http.ResponseWriter, req *http.Request) {
-	//todo: get token from req instead of this kludge
-	//t := "tt"
+func handlerTokenized(w http.ResponseWriter, req *http.Request) {
 	v := req.Header.Get("Authentication")
-	log.Println(" token ", v)
 
 	if !validateToken(v) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -61,28 +58,28 @@ func requestHandlerTokenized(w http.ResponseWriter, req *http.Request) {
 }
 
 func createToken(w http.ResponseWriter, req *http.Request) {
-	var acc account
+	var receivedAccount account
 	var l sync.RWMutex
 
-	err := json.NewDecoder(req.Body).Decode(&acc)
-	if err != nil {
-		log.Println(err)
+	err1 := json.NewDecoder(req.Body).Decode(&receivedAccount)
+	if err1 != nil {
+		log.Println(err1)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	//log.Println("parsed json - ", acc)
+
+	//log.Println("parsed json - ", receivedAccount)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": acc.Name,
-		"password": acc.Password,
+		"username": receivedAccount.Name,
+		"password": receivedAccount.Password,
 	})
-	tokenString, err := token.SignedString(mySigningKey)
-	if err != nil {
-		log.Println(err)
+	tokenString, err2 := token.SignedString(mySigningKey)
+	if err2 != nil {
+		log.Println(err2)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
 	log.Println("token has been created")
 
 	l.RLock()
@@ -95,14 +92,19 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 	}
 	//log.Println("time.Now() - ", time.Now())
 
-	b, err := json.Marshal(tokenCreated)
-	if err != nil {
-		log.Println("can't Marshal token", err)
+	b, err3 := json.Marshal(tokenCreated)
+	if err3 != nil {
+		log.Println("can't Marshal token", err3)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Write(b)
 	w.WriteHeader(http.StatusOK)
+	_, err4 := w.Write(b)
+	if err4 != nil {
+		log.Println(err4)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	go sanitizer(tokenCreated)
 

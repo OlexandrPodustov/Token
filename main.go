@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
@@ -12,34 +11,46 @@ import (
 
 const localhost = "http://localhost:8080/"
 
+var j = []byte(`{ "name": "olexa", "password": "pass" }`)
+
 func main() {
-	var j = []byte(`{ "name": "olexa", "password": "pass" }`)
-	token := authenticate(j)
-	tokenAlive(token)
-	//requestTokenized(token)
+	var acquiredToken = new(eapi.JwtToken)
+
+	if !requestTokenized(acquiredToken) {
+		acquiredToken = authenticate(j)
+	}
+	time.Sleep(5 * time.Second)
+	if !requestTokenized(acquiredToken) {
+		acquiredToken = authenticate(j)
+	}
 }
 
-func requestTokenized(token string) {
+func requestTokenized(token *eapi.JwtToken) bool {
+	if !tokenAlive(token) {
+		token = authenticate(j)
+	}
+	time.Sleep(5 * time.Second)
 	url := localhost + "hello"
 	client := &http.Client{}
 
 	req, err := http.NewRequest("GET", url, nil)
-	req.Header.Add("Authentication", token)
-
-	resp, err := client.Do(req)
 	if err != nil {
 		log.Println(err)
+	}
+	req.Header.Add("Authentication", token.Token)
+
+	resp, err2 := client.Do(req)
+	if err2 != nil {
+		log.Println(err2)
 	}
 	defer deferredClose(resp)
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Println(err)
+	log.Println("requestTokenized", resp.Status)
+	if resp.StatusCode != http.StatusOK {
+		return false
 	}
 
-	log.Println(string(body))
-	log.Println(resp.Status)
-
+	return true
 }
 
 func authenticate(jsonStr []byte) (token *eapi.JwtToken) {
@@ -51,14 +62,19 @@ func authenticate(jsonStr []byte) (token *eapi.JwtToken) {
 	defer deferredClose(resp)
 
 	var t eapi.JwtToken
-	json.NewDecoder(resp.Body).Decode(&t)
-	log.Println(t)
+	err2 := json.NewDecoder(resp.Body).Decode(&t)
+	if err2 != nil {
+		log.Println(err2)
+		return
+	}
 	return &t
 }
 
 func tokenAlive(t *eapi.JwtToken) bool {
-	if time.Now().Unix() > t.TimeToLive.Unix() {
-		log.Println("Token has died", t)
+	//log.Printf("tokenAlive time.Now().Unix() %+v", time.Now().Unix())
+	//log.Printf("tokenAlive t.TimeToLive.Unix() %+v", t.TimeToLive.Unix())
+	if time.Now().Unix() >= t.TimeToLive.Unix() {
+		log.Println("Token has died")
 		return false
 	}
 	return true

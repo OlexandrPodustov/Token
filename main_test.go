@@ -8,13 +8,13 @@ type tc struct {
 }
 
 var testCases = []tc{
-	tc{"in",
+	{"in",
 		"out",
 	},
 }
 
 func TestSuccess(t *testing.T) {
-	if testCases[0].input != testCases[0].input {
+	if testCases[0].input != testCases[0].expected {
 		t.Fatal("error occured")
 	}
 }
