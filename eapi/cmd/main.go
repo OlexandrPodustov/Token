@@ -12,10 +12,12 @@ import (
 
 const tokenTimeToLive = 6
 
-var (
-	mySigningKey = []byte("secret")
-	db           = make(map[string]struct{})
-)
+var inMemDB = database{}
+
+type database struct {
+	sync.RWMutex
+	mapa map[string]struct{}
+}
 
 type account struct {
 	Name     string
@@ -23,18 +25,20 @@ type account struct {
 }
 
 func main() {
+	inMemDB.mapa = make(map[string]struct{})
+
 	http.HandleFunc("/hello", handlerTokenized)
-	http.HandleFunc("/gettoken", createToken)
+	http.HandleFunc("/login", createToken)
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func validateToken(token string) bool {
-	var l sync.RWMutex
-
-	l.RLock()
-	_, ok := db[token]
-	l.RUnlock()
+	//inMemDB.Lock()
+	inMemDB.RLock()
+	_, ok := inMemDB.mapa[token]
+	//inMemDB.Unlock()
+	inMemDB.RUnlock()
 
 	if !ok {
 		log.Println("The token is not valid")
@@ -59,7 +63,7 @@ func handlerTokenized(w http.ResponseWriter, req *http.Request) {
 
 func createToken(w http.ResponseWriter, req *http.Request) {
 	var receivedAccount account
-	var l sync.RWMutex
+	mySigningKey := []byte("secret")
 
 	err1 := json.NewDecoder(req.Body).Decode(&receivedAccount)
 	if err1 != nil {
@@ -80,11 +84,11 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	//log.Println("token has been created")
 
-	l.Lock()
-	db[tokenString] = struct{}{}
-	l.Unlock()
+	inMemDB.Lock()
+	log.Println("new token has been written to the map")
+	inMemDB.mapa[tokenString] = struct{}{}
+	inMemDB.Unlock()
 
 	tokenCreated := eapi.JwtToken{
 		Token:      tokenString,
@@ -112,14 +116,12 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 }
 
 func sanitizer(token eapi.JwtToken) {
-	var l sync.RWMutex
-
-	//log.Println("db before delete", db)
-	//don't know how to trigger smth at some time. temporarily will so this via sleep
-	//time.Sleep(token.TimeToLive)
+	//don't know how to trigger smth at some time.
+	//temporarily will so this via sleep
 	time.Sleep(tokenTimeToLive * time.Second)
-	l.Lock()
-	delete(db, token.Token)
-	l.Unlock()
-	//log.Println(db)
+
+	inMemDB.Lock()
+	delete(inMemDB.mapa, token.Token)
+	log.Println("delete completed successfully")
+	inMemDB.Unlock()
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 	"token/eapi"
 )
@@ -18,9 +19,17 @@ type service1Client interface {
 }
 
 type implService1Client struct {
+	sync.RWMutex
 	UserName string         `json:"user"`
 	Password string         `json:"password"`
 	Token    *eapi.JwtToken `json:"token, omitempty"`
+}
+
+var client service1Client
+
+func init() {
+	log.Println("init")
+	client = newClient()
 }
 
 func main() {
@@ -28,62 +37,35 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8082", nil))
 }
 
-func newClient() *implService1Client {
-	log.Println("newClient")
-
-	var isc = implService1Client{}
-	file, err := os.Open("conf.json")
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	defer deferredFileClose(file)
-
-	err2 := json.NewDecoder(file).Decode(&isc)
-	if err2 != nil {
-		log.Fatalln(err2)
-	}
-
-	return &isc
-}
-
 func action(w http.ResponseWriter, req *http.Request) {
-	//var client service1Client = new(implService1Client)
-	log.Println("action")
-
-	var client service1Client = new(implService1Client)
-	client = newClient()
 	err := client.hello()
 	if err != nil {
 		log.Println(err)
 	}
-
 	return
 }
 
 func (s *implService1Client) hello() error {
 	log.Println("hello")
-
-	st, err := s.makeJSON()
-	if err != nil {
-		log.Println(err)
-	}
-
 	err2 := tokenValid(s.Token)
 	if err2 != nil {
-		s.Token = s.getToken([]byte(st))
-
+		s.getToken()
+	}
+	if tokenAlive(s.Token) {
+		s.getToken()
 	}
 
-	s.requestTokenized(s.Token)
+	if !s.requestTokenized() {
+		return fmt.Errorf("requestTokenized failed")
+	}
 	return nil
 }
-func (s implService1Client) makeJSON() (string, error) {
+func (s *implService1Client) makeJSON() (string, error) {
 
-	return `{ "name": "olexa", "password": "pass" }`, nil
+	return `{ "name": "olexa", "password": "pass123" }`, nil
 }
 
-func (s implService1Client) requestTokenized(token *eapi.JwtToken) bool {
+func (s *implService1Client) requestTokenized() bool {
 	url := localhost + "hello"
 	client := &http.Client{}
 
@@ -91,7 +73,7 @@ func (s implService1Client) requestTokenized(token *eapi.JwtToken) bool {
 	if err != nil {
 		log.Println(err)
 	}
-	req.Header.Add("Authentication", token.Token)
+	req.Header.Add("Authentication", s.Token.Token)
 
 	resp, err2 := client.Do(req)
 	if err2 != nil {
@@ -108,23 +90,31 @@ func (s implService1Client) requestTokenized(token *eapi.JwtToken) bool {
 	return true
 }
 
-func (s implService1Client) getToken(jsonStr []byte) (token *eapi.JwtToken) {
+func (s *implService1Client) getToken() {
 	log.Println("getToken")
-	url := localhost + "gettoken"
-	resp, err := http.Post(url, "", bytes.NewBuffer(jsonStr))
+	st, err := s.makeJSON()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	url := localhost + "login"
+	resp, err := http.Post(url, "", bytes.NewBuffer([]byte(st)))
 	if err != nil {
 		log.Println(err)
 		return
 	}
 	defer deferredRespClose(resp)
 
-	var t eapi.JwtToken
-	err2 := json.NewDecoder(resp.Body).Decode(&t)
+	err2 := json.NewDecoder(resp.Body).Decode(&s.Token)
 	if err2 != nil {
 		log.Println(err2)
 		return
 	}
-	return &t
+}
+
+func getTokenInAdvance() {
+
 }
 
 func tokenAlive(t *eapi.JwtToken) bool {
@@ -153,4 +143,23 @@ func deferredFileClose(f *os.File) {
 	if err := f.Close(); err != nil {
 		log.Println("failed to close response body in deferedClose func")
 	}
+}
+
+func newClient() *implService1Client {
+	log.Println("newClient")
+
+	var isc = implService1Client{}
+	file, err := os.Open("conf.json")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	defer deferredFileClose(file)
+
+	err2 := json.NewDecoder(file).Decode(&isc)
+	if err2 != nil {
+		log.Fatalln(err2)
+	}
+
+	return &isc
 }
