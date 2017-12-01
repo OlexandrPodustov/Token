@@ -1,3 +1,4 @@
+//review the synchronization completely
 package main
 
 import (
@@ -114,7 +115,7 @@ func (s *implService1Client) getToken() {
 }
 
 func getTokenInAdvance() {
-
+	//for loop. trigger each 10 sec to minimize cpu usage
 }
 
 func tokenAlive(t *eapi.JwtToken) bool {
