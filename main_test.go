@@ -20,7 +20,7 @@ var (
 )
 
 func TestSuccess(t *testing.T) {
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 10000; i++ {
 		resp, e := http.Get("http://localhost:8082/main")
 		if e != nil {
 			log.Println(e)

@@ -86,7 +86,7 @@ func createToken(w http.ResponseWriter, req *http.Request) {
 	}
 
 	inMemDB.Lock()
-	log.Println("new token has been written to the map")
+	//log.Println("new token has been written to the map")
 	inMemDB.mapa[tokenString] = struct{}{}
 	inMemDB.Unlock()
 
@@ -121,7 +121,8 @@ func sanitizer(token eapi.JwtToken) {
 	time.Sleep(tokenTimeToLive * time.Second)
 
 	inMemDB.Lock()
+	//log.Println("delete from map. key:", token.Token)
+	log.Println("delete from map.")
 	delete(inMemDB.mapa, token.Token)
-	log.Println("delete completed successfully")
 	inMemDB.Unlock()
 }
