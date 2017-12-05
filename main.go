@@ -5,15 +5,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"sync"
 	"time"
-	"token/eapi"
+
+	"./eapi"
 )
 
-const localhost = "http://localhost:8080/"
+const localhost = "http://localhost:8080"
 
 type service1Client interface {
 	hello() error
@@ -21,146 +23,167 @@ type service1Client interface {
 
 type implService1Client struct {
 	sync.RWMutex
-	UserName string         `json:"user"`
-	Password string         `json:"password"`
-	Token    *eapi.JwtToken `json:"token, omitempty"`
-}
-
-var client service1Client
-
-func init() {
-	log.Println("init")
-	client = newClient()
+	ch chan struct{}
+	//UserName  string         `json:"user"`
+	//Password  string         `json:"password"`
+	Token     *eapi.JwtToken `json:"token, omitempty"`
+	jsonBytes []byte
 }
 
 func main() {
-	http.HandleFunc("/main", action)
+	ss := newClient()
+	http.HandleFunc("/main", ss.action)
 	log.Fatal(http.ListenAndServe(":8082", nil))
 }
 
-func action(w http.ResponseWriter, req *http.Request) {
-	err := client.hello()
+func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
+	err := s.hello()
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
-	return
 }
 
 func (s *implService1Client) hello() error {
-	log.Println("hello")
-	err2 := tokenValid(s.Token)
-	if err2 != nil {
+	//log.Println("hello")
+
+	//add protection from the two simultaneous requests
+	e := tokenValid(s.Token)
+	if e != nil {
+		log.Println("e != nil")
 		s.getToken()
 	}
+	//add protection from the two simultaneous requests
 	if tokenAlive(s.Token) {
+		log.Println("!tokenAlive(s.Token)")
 		s.getToken()
 	}
 
-	if !s.requestTokenized() {
+	ok := s.requestTokenized()
+	if !ok {
 		return fmt.Errorf("requestTokenized failed")
 	}
-	return nil
-}
-func (s *implService1Client) makeJSON() (string, error) {
 
-	return `{ "name": "olexa", "password": "pass123" }`, nil
+	return nil
 }
 
 func (s *implService1Client) requestTokenized() bool {
-	url := localhost + "hello"
+	url := localhost + "/hello"
 	client := &http.Client{}
-
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Println(err)
+		return false
 	}
 	req.Header.Add("Authentication", s.Token.Token)
 
-	resp, err2 := client.Do(req)
-	if err2 != nil {
-		log.Println(err2)
+	resp, err := client.Do(req)
+	//http://devs.cloudimmunity.com/gotchas-and-common-mistakes-in-go-golang/index.html#close_http_resp_body
+	if resp != nil {
+		defer ioCloserErrCheck(resp.Body)
 	}
-	defer deferredRespClose(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		log.Println("requestTokenized nOk", resp.Status)
+	if err != nil {
+		log.Println(err)
 		return false
 	}
-	log.Println("requestTokenized  Ok", resp.Status)
+
+	//check status tokenexpired - get token and try again
+	//+protection from simultaneous requests
+	if resp.StatusCode == http.StatusUnauthorized {
+		log.Println("http.StatusUnauthorized")
+		s.getToken()
+	}
+
+	//if status error is different - log
+	if resp.StatusCode != http.StatusOK {
+		log.Println("requestTokenized status -", resp.Status)
+		return false
+	}
 
 	return true
 }
 
 func (s *implService1Client) getToken() {
-	log.Println("getToken")
-	st, err := s.makeJSON()
+	log.Println("/getToken")
+
+	url := localhost + "/login"
+	resp, err := http.Post(url, "application/json", bytes.NewReader(s.jsonBytes))
+	//http://devs.cloudimmunity.com/gotchas-and-common-mistakes-in-go-golang/index.html#close_http_resp_body
+	if resp != nil {
+		defer ioCloserErrCheck(resp.Body)
+	}
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	url := localhost + "login"
-	resp, err := http.Post(url, "", bytes.NewBuffer([]byte(st)))
+	err = json.NewDecoder(resp.Body).Decode(&s.Token)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	defer deferredRespClose(resp)
-
-	err2 := json.NewDecoder(resp.Body).Decode(&s.Token)
-	if err2 != nil {
-		log.Println(err2)
+	_, err = io.Copy(ioutil.Discard, resp.Body)
+	if err != nil {
+		log.Println(err)
 		return
 	}
+
+	//s.ch <- struct{}{}
+	log.Println("/getToken finished")
 }
 
-func getTokenInAdvance() {
-	//for loop. trigger each 10 sec to minimize cpu usage
+func (s *implService1Client) getTokenInAdvance() {
+	if s == nil {
+		log.Fatalln("struct is nil")
+	}
+	for {
+		if time.Now().After(s.Token.TimeToLive.Add(-1 * time.Second)) {
+			log.Println("\t getTokenInAdvance")
+			//log.Println("before", time.Now(), "\t\t", s.Token.TimeToLive, "\t\t", s.Token.TimeToLive.Add(-1*time.Second))
+			s.Lock()
+			s.getToken()
+			//go s.getToken()
+			//<-s.ch
+			s.Unlock()
+			//log.Println("after", time.Now(), "\t", s.Token.TimeToLive)
+		}
+		time.Sleep(time.Second * 1)
+	}
 }
 
 func tokenAlive(t *eapi.JwtToken) bool {
-	log.Println("tokenAlive")
-	if time.Now().Unix() >= t.TimeToLive.Unix() {
-		//log.Println("Token has died")
-		return false
-	}
-	return true
+	//log.Println("tokenAlive")
+	return time.Now().Unix() >= t.TimeToLive.Unix()
 }
 
 func tokenValid(t *eapi.JwtToken) error {
-	log.Println("tokenValid")
 	if t == nil {
 		return fmt.Errorf("nil Token value")
 	}
 	return nil
 }
 
-func deferredRespClose(res *http.Response) {
-	if err := res.Body.Close(); err != nil {
-		log.Println("failed to close response body in deferedClose func")
-	}
-}
-func deferredFileClose(f *os.File) {
+func ioCloserErrCheck(f io.Closer) {
 	if err := f.Close(); err != nil {
-		log.Println("failed to close response body in deferedClose func")
+		log.Println(err)
 	}
 }
 
 func newClient() *implService1Client {
 	log.Println("newClient")
-
 	var isc = implService1Client{}
-	file, err := os.Open("conf.json")
+	fileContent, err := ioutil.ReadFile("conf.json")
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return nil
 	}
+	isc.jsonBytes = fileContent
 
-	defer deferredFileClose(file)
-
-	err2 := json.NewDecoder(file).Decode(&isc)
-	if err2 != nil {
-		log.Fatalln(err2)
-	}
-
+	isc.Token = &eapi.JwtToken{}
+	//isc.ch = make(chan struct{}, 1)
+	isc.ch = make(chan struct{})
+	go isc.getTokenInAdvance()
 	return &isc
 }
+
+// time package - functions
+// how to work with goroutines

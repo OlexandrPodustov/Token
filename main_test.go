@@ -20,12 +20,13 @@ var (
 )
 
 func TestSuccess(t *testing.T) {
-	for i := 0; i < 10000; i++ {
-		resp, e := http.Get("http://localhost:8082/main")
+	for i := 0; i < 100000; i++ {
+		//resp, e := http.Get("http://localhost:8082/main")
+		_, e := http.Get("http://localhost:8082/main")
 		if e != nil {
 			log.Println(e)
 		}
-		log.Println(resp.StatusCode)
+		//log.Println(resp.StatusCode)
 	}
 	if testCases[0].input != testCases[0].input {
 		t.Fatal("error occured")
