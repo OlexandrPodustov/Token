@@ -1,4 +1,3 @@
-//review the synchronization completely
 package main
 
 import (
@@ -23,9 +22,7 @@ type service1Client interface {
 
 type implService1Client struct {
 	sync.RWMutex
-	ch chan struct{}
-	//UserName  string         `json:"user"`
-	//Password  string         `json:"password"`
+	ch        chan struct{}
 	Token     *eapi.JwtToken `json:"token, omitempty"`
 	jsonBytes []byte
 }
@@ -44,18 +41,16 @@ func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *implService1Client) hello() error {
-	//log.Println("hello")
-
-	//add protection from the two simultaneous requests
-	e := tokenValid(s.Token)
-	if e != nil {
+	if e := tokenValid(s.Token); e != nil {
 		log.Println("e != nil")
-		s.getToken()
+		s.Token = &eapi.JwtToken{}
+		//<-s.ch
 	}
-	//add protection from the two simultaneous requests
-	if tokenAlive(s.Token) {
-		log.Println("!tokenAlive(s.Token)")
-		s.getToken()
+
+	if tokenDead(s.Token) {
+		log.Println("!tokenDead(s.Token)")
+		go s.getToken()
+		<-s.ch
 	}
 
 	ok := s.requestTokenized()
@@ -74,6 +69,8 @@ func (s *implService1Client) requestTokenized() bool {
 		log.Println(err)
 		return false
 	}
+
+addTokenDoRequest:
 	req.Header.Add("Authentication", s.Token.Token)
 
 	resp, err := client.Do(req)
@@ -86,14 +83,14 @@ func (s *implService1Client) requestTokenized() bool {
 		return false
 	}
 
-	//check status tokenexpired - get token and try again
-	//+protection from simultaneous requests
 	if resp.StatusCode == http.StatusUnauthorized {
 		log.Println("http.StatusUnauthorized")
-		s.getToken()
+		go s.getToken()
+		<-s.ch
+		//there is no guarantee that it will be executed only once
+		goto addTokenDoRequest
 	}
 
-	//if status error is different - log
 	if resp.StatusCode != http.StatusOK {
 		log.Println("requestTokenized status -", resp.Status)
 		return false
@@ -103,7 +100,7 @@ func (s *implService1Client) requestTokenized() bool {
 }
 
 func (s *implService1Client) getToken() {
-	log.Println("/getToken")
+	log.Print("\t\t/getToken")
 
 	url := localhost + "/login"
 	resp, err := http.Post(url, "application/json", bytes.NewReader(s.jsonBytes))
@@ -113,22 +110,24 @@ func (s *implService1Client) getToken() {
 	}
 	if err != nil {
 		log.Println(err)
+		s.ch <- struct{}{}
 		return
 	}
 
 	err = json.NewDecoder(resp.Body).Decode(&s.Token)
 	if err != nil {
 		log.Println(err)
+		s.ch <- struct{}{}
 		return
 	}
 	_, err = io.Copy(ioutil.Discard, resp.Body)
 	if err != nil {
 		log.Println(err)
+		s.ch <- struct{}{}
 		return
 	}
-
-	//s.ch <- struct{}{}
-	log.Println("/getToken finished")
+	s.ch <- struct{}{}
+	log.Println("\t\t\t/getToken finished")
 }
 
 func (s *implService1Client) getTokenInAdvance() {
@@ -136,23 +135,19 @@ func (s *implService1Client) getTokenInAdvance() {
 		log.Fatalln("struct is nil")
 	}
 	for {
-		if time.Now().After(s.Token.TimeToLive.Add(-1 * time.Second)) {
-			log.Println("\t getTokenInAdvance")
+		if time.Now().After(s.Token.TimeToLive /*.Add(-1 * time.Second)*/) {
+			log.Println("getTokenInAdvance")
 			//log.Println("before", time.Now(), "\t\t", s.Token.TimeToLive, "\t\t", s.Token.TimeToLive.Add(-1*time.Second))
-			s.Lock()
-			s.getToken()
-			//go s.getToken()
-			//<-s.ch
-			s.Unlock()
-			//log.Println("after", time.Now(), "\t", s.Token.TimeToLive)
+			go s.getToken()
+			<-s.ch
 		}
 		time.Sleep(time.Second * 1)
 	}
 }
 
-func tokenAlive(t *eapi.JwtToken) bool {
-	//log.Println("tokenAlive")
-	return time.Now().Unix() >= t.TimeToLive.Unix()
+func tokenDead(t *eapi.JwtToken) bool {
+	//return time.Now().Unix() >= t.TimeToLive.Unix()
+	return time.Now().After(t.TimeToLive)
 }
 
 func tokenValid(t *eapi.JwtToken) error {
@@ -179,11 +174,9 @@ func newClient() *implService1Client {
 	isc.jsonBytes = fileContent
 
 	isc.Token = &eapi.JwtToken{}
-	//isc.ch = make(chan struct{}, 1)
 	isc.ch = make(chan struct{})
+
 	go isc.getTokenInAdvance()
+
 	return &isc
 }
-
-// time package - functions
-// how to work with goroutines
