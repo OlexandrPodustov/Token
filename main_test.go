@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"testing"
 )
@@ -20,15 +19,31 @@ var (
 )
 
 func TestSuccess(t *testing.T) {
-	for i := 0; i < 100000; i++ {
-		//resp, e := http.Get("http://localhost:8082/main")
+	t.Parallel()
+	for i := 0; i < cycleAmount; i++ {
 		_, e := http.Get("http://localhost:8082/main")
 		if e != nil {
-			log.Println(e)
+			t.Fatal(e)
 		}
-		//log.Println(resp.StatusCode)
 	}
-	if testCases[0].input != testCases[0].input {
-		t.Fatal("error occured")
+}
+
+func TestFail(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < cycleAmount; i++ {
+		_, e := http.Get("http://localhost:8082/main")
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+}
+
+func TestAnother(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < cycleAmount; i++ {
+		_, e := http.Get("http://localhost:8082/main")
+		if e != nil {
+			t.Fatal(e)
+		}
 	}
 }

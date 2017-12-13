@@ -46,7 +46,6 @@ func (db *database) validateToken(token string) bool {
 
 	db.RLock()
 	_, ok := db.mapa[token]
-	//check time to live of token
 	db.RUnlock()
 
 	return ok
@@ -68,7 +67,8 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	err := json.NewDecoder(req.Body).Decode(&receivedAccount)
 	if err != nil {
 		log.Println(err)
-		w.WriteHeader(http.StatusBadRequest)
+		//w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	log.Println("parsed json - ", receivedAccount)
@@ -80,13 +80,13 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	tokenString, err := token.SignedString(mySigningKey)
 	if err != nil {
 		log.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
+		//w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	toBeDestroyedAt := time.Now().Add(tokenTimeToLive * time.Second)
 	db.Lock()
-	//log.Println("new token has been written to the map")
 	db.mapa[tokenString] = toBeDestroyedAt
 	db.Unlock()
 
@@ -96,7 +96,7 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	}
 	err = json.NewEncoder(w).Encode(tokenCreated)
 	if err != nil {
-		http.Error(w, "can't Marshal/Encode token", http.StatusInternalServerError)
+		http.Error(w, "can't Marshal/Encode token"+err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
@@ -105,6 +105,7 @@ func (db *database) sanitizer() {
 	for {
 		time.Sleep(1 * time.Second)
 		db.Lock()
+		//change to switch
 		for key, value := range db.mapa {
 			if time.Now().After(value) {
 				log.Println(db.mapa)
