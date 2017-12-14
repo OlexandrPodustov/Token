@@ -45,10 +45,6 @@ func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *implService1Client) isTokenOK() bool {
-	//if tokenExist(s.Token) {
-	//	log.Println("Token doesn't exist. Maybe getToken func hasn't been called yet")
-	//}
-
 	if tokenDead(s.Token) {
 		log.Println("tokenDead")
 		return false
@@ -89,7 +85,6 @@ func (s *implService1Client) requestTokenized() bool {
 		return false
 	}
 
-	//addTokenDoRequest:
 	req.Header.Add("Authentication", s.Token.Token)
 
 	resp, err := client.Do(req)
@@ -120,9 +115,9 @@ func (s *implService1Client) requestTokenized() bool {
 }
 
 func (s *implService1Client) getToken() {
-	defer func() {
-		//s.chanGetToken <- true
-	}()
+	// defer func() {
+	// 	//s.chanGetToken <- true
+	// }()
 
 	log.Print("\t\t/getToken")
 
@@ -152,9 +147,6 @@ func (s *implService1Client) getToken() {
 }
 
 func (s *implService1Client) getTokenInAdvance() {
-	//if s == nil {
-	//	log.Fatalln("struct is nil")
-	//}
 	for {
 		if time.Now().After(s.Token.TimeToLive /*.Add(-1 * time.Second)*/) {
 			//log.Println("getTokenInAdvance")
