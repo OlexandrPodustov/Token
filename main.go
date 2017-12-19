@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -15,20 +14,34 @@ import (
 )
 
 const (
-	localhost   = "http://localhost:8080"
-	cycleAmount = 10000
+	localhost = "http://localhost:8080"
 )
 
-type service1Client interface {
-	hello() error
-}
+//type service1Client interface {
+//	hello()
+//}
 
 type implService1Client struct {
 	sync.RWMutex
-	//chanSync     chan struct{}
-	//chanGetToken chan bool
-	Token     *eapi.JwtToken `json:"token, omitempty"`
-	jsonBytes []byte
+	chanGetToken chan bool
+	Token        *eapi.JwtToken `json:"token, omitempty"`
+	jsonBytes    []byte
+	ttl          time.Duration
+}
+
+func newClient() *implService1Client {
+	var isc = implService1Client{}
+	var err error
+	isc.jsonBytes, err = ioutil.ReadFile("conf.json")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	isc.Token = &eapi.JwtToken{}
+	isc.chanGetToken = make(chan bool, 1)
+
+	go isc.getTokenInAdvance()
+
+	return &isc
 }
 
 func main() {
@@ -38,49 +51,30 @@ func main() {
 }
 
 func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
-	err := s.hello()
-	if err != nil {
-		log.Fatalln(err)
+	s.hello()
+}
+
+func (s *implService1Client) hello() {
+	select {
+	case s.chanGetToken <- true:
+		if s.isTokenDead() {
+			log.Println("hello - get token")
+			s.getToken()
+		} else {
+			<-s.chanGetToken
+		}
+		//use afnerfunc
+	default:
+		//log.Println("hello check if token is dead skipped")
+	}
+	if !s.isTokenDead() {
+		if !s.performRequestWithToken() {
+			//log.Println("performRequestWithToken failed")
+		}
 	}
 }
 
-func (s *implService1Client) isTokenOK() bool {
-	//if tokenExist(s.Token) {
-	//	log.Println("Token doesn't exist. Maybe getToken func hasn't been called yet")
-	//}
-
-	if tokenDead(s.Token) {
-		log.Println("tokenDead")
-		return false
-	}
-	return true
-}
-
-func (s *implService1Client) hello() error {
-	//select {
-	//case s.chanSync <- struct{}{}:
-	if !s.isTokenOK() {
-		s.getToken()
-	}
-	//	select {
-	//	case <-s.chanGetToken:
-	//		fmt.Println("successfully read after getToken")
-	//		<-s.chanSync
-	//	default:
-	//		fmt.Println("token is not OK")
-	//	}
-	//default:
-	//	log.Println("too many attemts to call getToken")
-	//}
-
-	if !s.requestTokenized() {
-		return fmt.Errorf("requestTokenized failed")
-	}
-
-	return nil
-}
-
-func (s *implService1Client) requestTokenized() bool {
+func (s *implService1Client) performRequestWithToken() bool {
 	url := localhost + "/hello"
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
@@ -88,12 +82,9 @@ func (s *implService1Client) requestTokenized() bool {
 		log.Println(err)
 		return false
 	}
-
-	//addTokenDoRequest:
 	req.Header.Add("Authentication", s.Token.Token)
 
 	resp, err := client.Do(req)
-	//http://devs.cloudimmunity.com/gotchas-and-common-mistakes-in-go-golang/index.html#close_http_resp_body
 	if resp != nil {
 		defer ioCloserErrCheck(resp.Body)
 	}
@@ -104,15 +95,24 @@ func (s *implService1Client) requestTokenized() bool {
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		log.Println("http.StatusUnauthorized")
+		select {
+		case s.chanGetToken <- true:
+			if s.isTokenDead() {
+				log.Println("StatusUnauthorized - get token")
+				s.getToken()
+				s.performRequestWithToken()
+			} else {
+				<-s.chanGetToken
+				s.performRequestWithToken()
+			}
+		}
 		//s.getToken()
-		//<-s.chanSync
-		//<-s.gtCh
 		//there is no guarantee that it will be executed only once
 		//not with a goto addTokenDoRequest or do.once
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Println("requestTokenized status -", resp.Status)
+		log.Println("performRequestWithToken status -", resp.Status)
 		return false
 	}
 
@@ -121,14 +121,12 @@ func (s *implService1Client) requestTokenized() bool {
 
 func (s *implService1Client) getToken() {
 	defer func() {
-		//s.chanGetToken <- true
+		<-s.chanGetToken
 	}()
-
 	log.Print("\t\t/getToken")
 
 	url := localhost + "/login"
 	resp, err := http.Post(url, "application/json", bytes.NewReader(s.jsonBytes))
-	//http://devs.cloudimmunity.com/gotchas-and-common-mistakes-in-go-golang/index.html#close_http_resp_body
 	if resp != nil {
 		defer ioCloserErrCheck(resp.Body)
 	}
@@ -147,54 +145,36 @@ func (s *implService1Client) getToken() {
 		log.Println(err)
 		return
 	}
-	//s.chanSync <- struct{}{}
+	s.ttl = s.Token.TimeToLive.Sub(time.Now()) // - time.Millisecond*10
 	log.Println("\t\t\t/getToken finished")
 }
 
 func (s *implService1Client) getTokenInAdvance() {
-	//if s == nil {
-	//	log.Fatalln("struct is nil")
-	//}
 	for {
-		if time.Now().After(s.Token.TimeToLive /*.Add(-1 * time.Second)*/) {
-			//log.Println("getTokenInAdvance")
-			s.getToken()
-			//<-s.chanSync
-			//<-s.gtCh
+		select {
+		case <-time.After(s.ttl):
+			select {
+			case s.chanGetToken <- true:
+				if s.isTokenDead() {
+					log.Println("getTokenInAdvance - get token")
+					s.getToken()
+				} else {
+					<-s.chanGetToken
+				}
+			default:
+
+			}
 		}
-		//avoid sleep usage
-		time.Sleep(time.Second * 1)
+
 	}
 }
 
-func tokenDead(t *eapi.JwtToken) bool {
-	return time.Now().After(t.TimeToLive)
-}
-
-func tokenExist(t *eapi.JwtToken) bool {
-	return !(t == nil)
+func (s *implService1Client) isTokenDead() bool {
+	return time.Now().After(s.Token.TimeToLive)
 }
 
 func ioCloserErrCheck(f io.Closer) {
 	if err := f.Close(); err != nil {
 		log.Println(err)
 	}
-}
-
-func newClient() *implService1Client {
-	log.Println("newClient")
-	var isc = implService1Client{}
-	fileContent, err := ioutil.ReadFile("conf.json")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	isc.jsonBytes = fileContent
-
-	isc.Token = &eapi.JwtToken{}
-	//isc.chanSync = make(chan struct{}, 1)
-	//isc.gtCh = make(chan bool, 1)
-
-	go isc.getTokenInAdvance()
-
-	return &isc
 }

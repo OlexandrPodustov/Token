@@ -25,7 +25,6 @@ type account struct {
 
 func main() {
 	inMemDB := newMap()
-	go inMemDB.sanitizer()
 
 	http.HandleFunc("/hello", inMemDB.handlerTokenized)
 	http.HandleFunc("/login", inMemDB.createToken)
@@ -55,15 +54,15 @@ func (db *database) handlerTokenized(w http.ResponseWriter, req *http.Request) {
 	tokenFromRequest := req.Header.Get("Authentication")
 	if !db.validateToken(tokenFromRequest) {
 		w.WriteHeader(http.StatusUnauthorized)
-		return
+	} else {
+		w.WriteHeader(http.StatusOK)
 	}
-	w.WriteHeader(http.StatusOK)
 }
 
 func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
-	var receivedAccount account
 	mySigningKey := []byte("secret")
 
+	var receivedAccount account
 	err := json.NewDecoder(req.Body).Decode(&receivedAccount)
 	if err != nil {
 		log.Println(err)
@@ -88,6 +87,16 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	toBeDestroyedAt := time.Now().Add(tokenTimeToLive * time.Second)
 	db.Lock()
 	db.mapa[tokenString] = toBeDestroyedAt
+	//time.AfterFunc
+	time.AfterFunc(tokenTimeToLive, func() {
+		db.Lock()
+		if ttl, ok := db.mapa[tokenString]; ok {
+			if time.Now().After(ttl) {
+				delete(db.mapa, tokenString)
+			}
+		}
+		db.Unlock()
+	})
 	db.Unlock()
 
 	tokenCreated := eapi.JwtToken{
@@ -98,21 +107,5 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		http.Error(w, "can't Marshal/Encode token"+err.Error(), http.StatusInternalServerError)
 		return
-	}
-}
-
-func (db *database) sanitizer() {
-	for {
-		time.Sleep(1 * time.Second)
-		db.Lock()
-		//change to switch
-		for key, value := range db.mapa {
-			if time.Now().After(value) {
-				log.Println(db.mapa)
-				delete(db.mapa, key)
-				log.Println(db.mapa)
-			}
-		}
-		db.Unlock()
 	}
 }
