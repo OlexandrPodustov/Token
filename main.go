@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	localhost = "http://localhost:8080"
+	localhost   = "http://localhost:8080"
+	cycleAmount = 10000
 )
 
 //type service1Client interface {
@@ -107,6 +108,8 @@ func (s *implService1Client) performRequestWithToken() bool {
 			}
 		}
 		//s.getToken()
+		//<-s.chanSync
+		//<-s.gtCh
 		//there is no guarantee that it will be executed only once
 		//not with a goto addTokenDoRequest or do.once
 	}
