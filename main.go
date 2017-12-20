@@ -10,12 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"./eapi"
+	"token/eapi"
 )
 
 const (
-	localhost   = "http://localhost:8080"
-	cycleAmount = 10000
+	localhost = "http://localhost:8080"
 )
 
 //type service1Client interface {
@@ -24,25 +23,21 @@ const (
 
 type implService1Client struct {
 	sync.RWMutex
-	chanGetToken chan bool
-	Token        *eapi.JwtToken `json:"token, omitempty"`
-	jsonBytes    []byte
-	ttl          time.Duration
+	Token     *eapi.JwtToken `json:"token, omitempty"`
+	jsonBytes []byte
+	ttl       time.Duration
 }
 
 func newClient() *implService1Client {
-	var isc = implService1Client{}
+	var implementationServiceClient = implService1Client{}
 	var err error
-	isc.jsonBytes, err = ioutil.ReadFile("conf.json")
+	implementationServiceClient.jsonBytes, err = ioutil.ReadFile("conf.json")
 	if err != nil {
 		log.Fatalln(err)
 	}
-	isc.Token = &eapi.JwtToken{}
-	isc.chanGetToken = make(chan bool, 1)
+	implementationServiceClient.Token = &eapi.JwtToken{}
 
-	go isc.getTokenInAdvance()
-
-	return &isc
+	return &implementationServiceClient
 }
 
 func main() {
@@ -56,22 +51,14 @@ func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *implService1Client) hello() {
-	select {
-	case s.chanGetToken <- true:
-		if s.isTokenDead() {
-			log.Println("hello - get token")
-			s.getToken()
-		} else {
-			<-s.chanGetToken
-		}
-		//use afnerfunc
-	default:
-		//log.Println("hello check if token is dead skipped")
-	}
-	if !s.isTokenDead() {
-		if !s.performRequestWithToken() {
-			//log.Println("performRequestWithToken failed")
-		}
+	s.Lock()
+	if s.isTokenDead() {
+		log.Println("hello - get token")
+		s.getToken()
+		s.Unlock()
+	} else {
+		s.Unlock()
+		s.performRequestWithToken()
 	}
 }
 
@@ -83,6 +70,7 @@ func (s *implService1Client) performRequestWithToken() bool {
 		log.Println(err)
 		return false
 	}
+
 	req.Header.Add("Authentication", s.Token.Token)
 
 	resp, err := client.Do(req)
@@ -96,22 +84,14 @@ func (s *implService1Client) performRequestWithToken() bool {
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		log.Println("http.StatusUnauthorized")
-		select {
-		case s.chanGetToken <- true:
-			if s.isTokenDead() {
-				log.Println("StatusUnauthorized - get token")
-				s.getToken()
-				s.performRequestWithToken()
-			} else {
-				<-s.chanGetToken
-				s.performRequestWithToken()
-			}
+		s.Lock()
+		if s.isTokenDead() {
+			log.Println("StatusUnauthorized - get token")
+			s.getToken()
+			s.Unlock()
+			s.performRequestWithToken()
 		}
-		//s.getToken()
-		//<-s.chanSync
-		//<-s.gtCh
-		//there is no guarantee that it will be executed only once
-		//not with a goto addTokenDoRequest or do.once
+		s.Unlock()
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -123,9 +103,6 @@ func (s *implService1Client) performRequestWithToken() bool {
 }
 
 func (s *implService1Client) getToken() {
-	defer func() {
-		<-s.chanGetToken
-	}()
 	log.Print("\t\t/getToken")
 
 	url := localhost + "/login"
@@ -148,28 +125,15 @@ func (s *implService1Client) getToken() {
 		log.Println(err)
 		return
 	}
-	s.ttl = s.Token.TimeToLive.Sub(time.Now()) // - time.Millisecond*10
+	s.ttl = s.Token.TimeToLive.Sub(time.Now()) - time.Millisecond*10
+
+	time.AfterFunc(s.ttl, func() {
+		s.Lock()
+		log.Println("\t get token in advance")
+		s.getToken()
+		s.Unlock()
+	})
 	log.Println("\t\t\t/getToken finished")
-}
-
-func (s *implService1Client) getTokenInAdvance() {
-	for {
-		select {
-		case <-time.After(s.ttl):
-			select {
-			case s.chanGetToken <- true:
-				if s.isTokenDead() {
-					log.Println("getTokenInAdvance - get token")
-					s.getToken()
-				} else {
-					<-s.chanGetToken
-				}
-			default:
-
-			}
-		}
-
-	}
 }
 
 func (s *implService1Client) isTokenDead() bool {

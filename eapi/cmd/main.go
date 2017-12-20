@@ -87,17 +87,18 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	toBeDestroyedAt := time.Now().Add(tokenTimeToLive * time.Second)
 	db.Lock()
 	db.mapa[tokenString] = toBeDestroyedAt
-	//time.AfterFunc
-	time.AfterFunc(tokenTimeToLive, func() {
+	db.Unlock()
+
+	time.AfterFunc(tokenTimeToLive*time.Second, func() {
 		db.Lock()
 		if ttl, ok := db.mapa[tokenString]; ok {
 			if time.Now().After(ttl) {
 				delete(db.mapa, tokenString)
+				log.Println("\t\t\t delete from map")
 			}
 		}
 		db.Unlock()
 	})
-	db.Unlock()
 
 	tokenCreated := eapi.JwtToken{
 		Token:      tokenString,

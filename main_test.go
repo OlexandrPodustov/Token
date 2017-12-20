@@ -5,7 +5,10 @@ import (
 	"testing"
 )
 
-const cycleAmount = 10000
+const (
+	cycleAmount = 100000
+	targetURL   = "http://localhost:8082/main"
+)
 
 type tc struct {
 	input    string
@@ -15,7 +18,7 @@ type tc struct {
 func TestSuccess(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < cycleAmount; i++ {
-		_, e := http.Get("http://localhost:8082/main")
+		_, e := http.Get(targetURL)
 		if e != nil {
 			t.Error(e)
 		}
@@ -25,7 +28,7 @@ func TestSuccess(t *testing.T) {
 func TestFail(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < cycleAmount; i++ {
-		_, e := http.Get("http://localhost:8082/main")
+		_, e := http.Get(targetURL)
 		if e != nil {
 			t.Error(e)
 		}
@@ -35,7 +38,7 @@ func TestFail(t *testing.T) {
 func TestAnother(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < cycleAmount; i++ {
-		_, e := http.Get("http://localhost:8082/main")
+		_, e := http.Get(targetURL)
 		if e != nil {
 			t.Error(e)
 		}
