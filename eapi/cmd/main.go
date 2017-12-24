@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"../../eapi"
+	"token/eapi"
+
 	"github.com/dgrijalva/jwt-go"
 )
 
