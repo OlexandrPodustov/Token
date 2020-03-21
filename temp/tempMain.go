@@ -16,6 +16,7 @@ type implService1Client3 struct {
 func newClient3() *implService1Client3 {
 	i := &implService1Client3{}
 	i.chanGetToken = make(chan bool, 1)
+
 	return i
 }
 
@@ -30,32 +31,25 @@ func (s *implService1Client3) action(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *implService1Client3) hello() {
-	select {
-	case s.chanGetToken <- true:
-		if s.isTokenDead() {
-			log.Println("after?  ", time.Now().After(s.ttl))
-			s.getToken()
-		} else {
-			s.performRequestWithToken()
-		}
+	s.chanGetToken <- true
+	if s.isTokenDead() {
+		log.Println("after?  ", time.Now().After(s.ttl))
+		s.getToken()
+	} else {
+		s.performRequestWithToken()
 	}
 }
 
 func (s *implService1Client3) performRequestWithToken() {
-	//log.Println("performRequestWithToken")
 	<-s.chanGetToken
 }
 
 func (s *implService1Client3) getToken() {
-	//defer func() {
-	//	<-s.chanGetToken
-	//}()
-	log.Print("\t\t/getToken")
-	s.ttl = time.Now().Add(3 * time.Second)
+	tokenAlive := 3
+	s.ttl = time.Now().Add(time.Duration(tokenAlive) * time.Second)
 	<-s.chanGetToken
 }
 
 func (s *implService1Client3) isTokenDead() bool {
-	//log.Println("after?  ", time.Now().After(s.ttl))
 	return time.Now().After(s.ttl)
 }

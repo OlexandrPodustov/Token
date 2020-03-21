@@ -7,8 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"token/eapi"
-
+	"github.com/OlexandrPodustov/token/eapi"
 	"github.com/dgrijalva/jwt-go"
 )
 
@@ -16,7 +15,7 @@ const tokenTimeToLive = 6
 
 type database struct {
 	sync.RWMutex
-	mapa map[string]time.Time
+	list map[string]time.Time
 }
 
 type account struct {
@@ -35,7 +34,8 @@ func main() {
 
 func newMap() *database {
 	var m = &database{}
-	m.mapa = make(map[string]time.Time)
+	m.list = make(map[string]time.Time)
+
 	return m
 }
 
@@ -45,7 +45,7 @@ func (db *database) validateToken(token string) bool {
 	}
 
 	db.RLock()
-	_, ok := db.mapa[token]
+	_, ok := db.list[token]
 	db.RUnlock()
 
 	return ok
@@ -64,38 +64,39 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 	mySigningKey := []byte("secret")
 
 	var receivedAccount account
+
 	err := json.NewDecoder(req.Body).Decode(&receivedAccount)
 	if err != nil {
 		log.Println(err)
-		//w.WriteHeader(http.StatusBadRequest)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+
 		return
 	}
-	log.Println("parsed json - ", receivedAccount)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"username": receivedAccount.Name,
 		"password": receivedAccount.Password,
 	})
+
 	tokenString, err := token.SignedString(mySigningKey)
 	if err != nil {
 		log.Println(err)
-		//w.WriteHeader(http.StatusInternalServerError)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
 	toBeDestroyedAt := time.Now().Add(tokenTimeToLive * time.Second)
+
 	db.Lock()
-	db.mapa[tokenString] = toBeDestroyedAt
+	db.list[tokenString] = toBeDestroyedAt
 	db.Unlock()
 
 	time.AfterFunc(tokenTimeToLive*time.Second, func() {
 		db.Lock()
-		if ttl, ok := db.mapa[tokenString]; ok {
+		if ttl, ok := db.list[tokenString]; ok {
 			if time.Now().After(ttl) {
-				delete(db.mapa, tokenString)
-				log.Println("\t\t\t delete from map")
+				delete(db.list, tokenString)
 			}
 		}
 		db.Unlock()
@@ -105,9 +106,12 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 		Token:      tokenString,
 		TimeToLive: toBeDestroyedAt,
 	}
+
 	err = json.NewEncoder(w).Encode(tokenCreated)
 	if err != nil {
-		http.Error(w, "can't Marshal/Encode token"+err.Error(), http.StatusInternalServerError)
+		log.Println("failed to encode token", err)
+		http.Error(w, "can't encode token", http.StatusInternalServerError)
+
 		return
 	}
 }

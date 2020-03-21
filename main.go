@@ -10,34 +10,31 @@ import (
 	"sync"
 	"time"
 
-	"token/eapi"
+	"github.com/OlexandrPodustov/token/eapi"
 )
 
 const (
 	localhost = "http://localhost:8080"
 )
 
-//type service1Client interface {
-//	hello()
-//}
-
 type implService1Client struct {
 	sync.RWMutex
-	Token     *eapi.JwtToken `json:"token, omitempty"`
+	Token     *eapi.JwtToken `json:"token,omitempty"`
 	jsonBytes []byte
 	ttl       time.Duration
 }
 
 func newClient() *implService1Client {
-	var implementationServiceClient = implService1Client{}
-	var err error
-	implementationServiceClient.jsonBytes, err = ioutil.ReadFile("conf.json")
+	raw, err := ioutil.ReadFile("conf.json")
 	if err != nil {
 		log.Fatalln(err)
 	}
-	implementationServiceClient.Token = &eapi.JwtToken{}
 
-	return &implementationServiceClient
+	var cl implService1Client
+	cl.jsonBytes = raw
+	cl.Token = &eapi.JwtToken{}
+
+	return &cl
 }
 
 func main() {
@@ -53,7 +50,6 @@ func (s *implService1Client) action(w http.ResponseWriter, req *http.Request) {
 func (s *implService1Client) hello() {
 	s.Lock()
 	if s.isTokenDead() {
-		log.Println("hello - get token")
 		s.getToken()
 		s.Unlock()
 	} else {
@@ -62,13 +58,14 @@ func (s *implService1Client) hello() {
 	}
 }
 
-func (s *implService1Client) performRequestWithToken() bool {
+func (s *implService1Client) performRequestWithToken() {
 	url := localhost + "/hello"
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		log.Println(err)
-		return false
+		return
 	}
 
 	req.Header.Add("Authentication", s.Token.Token)
@@ -77,39 +74,35 @@ func (s *implService1Client) performRequestWithToken() bool {
 	if resp != nil {
 		defer ioCloserErrCheck(resp.Body)
 	}
+
 	if err != nil {
 		log.Println(err)
-		return false
+		return
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		log.Println("http.StatusUnauthorized")
 		s.Lock()
 		if s.isTokenDead() {
-			log.Println("StatusUnauthorized - get token")
 			s.getToken()
 			s.Unlock()
 			s.performRequestWithToken()
+		} else {
+			s.Unlock()
 		}
-		s.Unlock()
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Println("performRequestWithToken status -", resp.Status)
-		return false
+		return
 	}
-
-	return true
 }
 
 func (s *implService1Client) getToken() {
-	log.Print("\t\t/getToken")
-
-	url := localhost + "/login"
-	resp, err := http.Post(url, "application/json", bytes.NewReader(s.jsonBytes))
+	resp, err := http.Post(localhost+"/login", "application/json", bytes.NewReader(s.jsonBytes))
 	if resp != nil {
 		defer ioCloserErrCheck(resp.Body)
 	}
+
 	if err != nil {
 		log.Println(err)
 		return
@@ -120,20 +113,23 @@ func (s *implService1Client) getToken() {
 		log.Println(err)
 		return
 	}
+
 	_, err = io.Copy(ioutil.Discard, resp.Body)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	s.ttl = s.Token.TimeToLive.Sub(time.Now()) - time.Millisecond*10
+
+	miniTimeout := 10
+	s.ttl = time.Until(s.Token.TimeToLive) - time.Millisecond*time.Duration(miniTimeout)
 
 	time.AfterFunc(s.ttl, func() {
-		s.Lock()
 		log.Println("\t get token in advance")
+
+		s.Lock()
 		s.getToken()
 		s.Unlock()
 	})
-	log.Println("\t\t\t/getToken finished")
 }
 
 func (s *implService1Client) isTokenDead() bool {
