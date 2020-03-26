@@ -109,7 +109,7 @@ func (db *database) createToken(w http.ResponseWriter, req *http.Request) {
 
 	err = json.NewEncoder(w).Encode(tokenCreated)
 	if err != nil {
-		log.Println("failed to encode token", err)
+		log.Println("encode token", err)
 		http.Error(w, "can't encode token", http.StatusInternalServerError)
 
 		return
